@@ -1,0 +1,103 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql-store-deployment
+  labels:
+    app: mongo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-store
+  template:
+    metadata:
+      labels:
+        app: mysql-store
+    spec:
+      containers:
+      - name: mysql
+        image: mysql:8.0.27
+        ports:
+        - containerPort: 3306
+        volumeMounts:
+          - name: mysql-initdb
+            mountPath: /docker-entrypoint-initdb.d          
+        env:
+          - name: MYSQL_ROOT_PASSWORD
+            value: password
+          - name: MYSQL_DATABASE
+            value: store-library
+      volumes:
+        - name: mysql-initdb
+          configMap:
+            name: mysql-store-initdb-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-store-service 
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql-store
+  ports:
+    - protocol: TCP
+      port: 3306
+      targetPort: 3306
+# microk8s kubectl port-forward -n library-ns service/mysql-store-service 13306:3306
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-store-ext-service 
+spec:
+  type: NodePort
+  selector:
+    app: mysql-store
+  ports:
+    - protocol: TCP
+      port: 3306
+      targetPort: 3306
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-store-initdb-config
+data:
+  initdb.sql: |
+    CREATE DATABASE IF NOT EXISTS `store`;
+    USE `store`;
+    CREATE TABLE IF NOT EXISTS cart (
+      id INTEGER NOT NULL AUTO_INCREMENT,
+      usuario VARCHAR(60),
+      isbn VARCHAR(60),
+      cantidad INTEGER,
+      PRIMARY KEY (id)
+    );
+      DELIMITER //
+      CREATE PROCEDURE GetCartUser(usuario VARCHAR(60))
+      BEGIN
+        SELECT c.* FROM cart c WHERE c.usuario = usuario;
+      END //
+      CREATE PROCEDURE AddCartUser(usuario VARCHAR(60),isbn VARCHAR(60), unidades INTEGER)
+      BEGIN
+        DECLARE cant INTEGER DEFAULT NULL;
+        SELECT c.cantidad FROM cart c WHERE c.isbn = isbn AND c.usuario = usuario INTO cant;
+        if ISNULL(cant) then 
+          INSERT INTO cart (usuario,isbn,cantidad) VALUES (usuario, isbn, 1);
+        ELSE
+          UPDATE cart c SET cantidad=unidades WHERE c.isbn = isbn AND c.usuario = usuario;
+        END if;	
+      END //
+      CREATE PROCEDURE DeleteCartUser(usuario VARCHAR(60),isbn VARCHAR(60))
+      BEGIN
+        DELETE FROM cart c WHERE c.isbn = isbn AND c.usuario = usuario;
+      END //
+      CREATE PROCEDURE DeleteAllCartUser(usuario VARCHAR(60))
+      BEGIN
+        DELETE FROM cart c WHERE c.usuario = usuario;
+      END //
+      DELIMITER ;
+      INSERT INTO cart (usuario,isbn,cantidad) VALUES ("student", "9789584276971", 5);
+      INSERT INTO cart (usuario,isbn,cantidad) VALUES ("juan", "9789584276971", 1);
+      INSERT INTO cart (usuario,isbn,cantidad) VALUES ("juan", "9789585190603", 1);
